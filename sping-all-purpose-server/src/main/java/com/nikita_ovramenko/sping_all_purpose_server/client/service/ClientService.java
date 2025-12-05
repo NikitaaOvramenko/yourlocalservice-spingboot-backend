@@ -23,6 +23,7 @@ public class ClientService {
     @Transactional
     public ClientDto saveClient(ClientDto clientDto) {
         Client client = clientMapper.toEntity(clientDto);
+
         clientRepo.save(client);
 
         return clientMapper.toDto(client);

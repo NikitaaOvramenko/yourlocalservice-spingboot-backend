@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.nikita_ovramenko.sping_all_purpose_server.location.model.Location;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -24,7 +25,7 @@ public class Client {
     private String name;
     private String lastname;
 
-    @OneToMany(mappedBy = "client")
+    @OneToMany(mappedBy = "client", cascade = CascadeType.ALL)
     private List<Location> locations = new ArrayList<>();
 
     public Client() {

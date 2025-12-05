@@ -1,9 +1,12 @@
 package com.nikita_ovramenko.sping_all_purpose_server.location.mapper;
 
+import org.springframework.stereotype.Component;
+
 import com.nikita_ovramenko.sping_all_purpose_server.interfaces.Mapper;
 import com.nikita_ovramenko.sping_all_purpose_server.location.dto.LocationDto;
 import com.nikita_ovramenko.sping_all_purpose_server.location.model.Location;
 
+@Component
 public class LocationMapper implements Mapper<Location, LocationDto> {
 
     @Override

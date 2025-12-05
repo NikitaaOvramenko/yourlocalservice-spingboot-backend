@@ -1,9 +1,12 @@
 package com.nikita_ovramenko.sping_all_purpose_server.client.mapper;
 
+import org.springframework.stereotype.Component;
+
 import com.nikita_ovramenko.sping_all_purpose_server.client.dto.ClientDto;
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
 import com.nikita_ovramenko.sping_all_purpose_server.interfaces.Mapper;
 
+@Component
 public class ClientMapper implements Mapper<Client, ClientDto> {
     public ClientMapper() {
     }
