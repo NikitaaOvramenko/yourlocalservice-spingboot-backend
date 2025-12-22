@@ -1,7 +1,9 @@
 package com.nikita_ovramenko.sping_all_purpose_server.email;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -21,6 +23,10 @@ public class EmailService {
     private final ClientRepo clientRepo;
     private final LocationRepo locationRepo;
 
+    private Map<String, String> workTypeToEmail = Map.of(
+            "Junk Removal", "ovramenko.nikitka@gmail.com",
+            "Appliance Repair", "tcspaintsfl@gmail.com");
+
     public EmailService(JavaMailSender javaMailSender, ClientRepo clientRepo, LocationRepo locationRepo) {
         this.javaMailSender = javaMailSender;
         this.clientRepo = clientRepo;
@@ -35,6 +41,7 @@ public class EmailService {
         Client client = new Client();
         List<Location> locations = new ArrayList<>();
         Location location = new Location();
+        String sender = workTypeToEmail.get(formDto.workType());
 
         client.setEmail(formDto.email());
         client.setName(formDto.name());
@@ -57,7 +64,8 @@ public class EmailService {
         // Email to Client
         // -------------------------
         SimpleMailMessage mailForCustomer = new SimpleMailMessage();
-        mailForCustomer.setFrom("tcspaintsfl@gmail.com");
+
+        mailForCustomer.setFrom(sender);
         mailForCustomer.setTo(formDto.email());
         mailForCustomer.setSubject("Your Appointment Request Has Been Received");
 
@@ -91,8 +99,8 @@ public class EmailService {
         // Email to Business
         // -------------------------
         SimpleMailMessage mailForBusiness = new SimpleMailMessage();
-        mailForBusiness.setFrom("tcspaintsfl@gmail.com");
-        mailForBusiness.setTo("tcspaintsfl@gmail.com"); // your own inbox
+        mailForBusiness.setFrom(sender);
+        mailForBusiness.setTo(sender); // your own inbox
 
         mailForBusiness.setSubject("New Appointment Request Submitted");
 
