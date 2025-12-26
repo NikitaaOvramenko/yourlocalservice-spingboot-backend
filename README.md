@@ -31,7 +31,7 @@ The system follows a standard Layered Architecture to ensure separation of conce
 
 The following diagram illustrates the target architecture, including implemented modules (Client, Location) and planned extensions (Appointments, Estimates).
 
-![System ERD](./applience-TCS.drawio.png)
+![System ERD](./applience-TCS.drawio.svg)
 
 ## Key Features
 
