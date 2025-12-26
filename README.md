@@ -1,4 +1,4 @@
-# Spring All-Purpose Server
+# YourLocal[Service]-Backend
 
 ![Java](https://img.shields.io/badge/Java-17-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.0-green.svg)
