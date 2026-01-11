@@ -19,120 +19,123 @@ import jakarta.transaction.Transactional;
 
 @Service
 public class EmailService {
-    private final JavaMailSender javaMailSender;
-    private final ClientRepo clientRepo;
-    private final LocationRepo locationRepo;
+        private final JavaMailSender javaMailSender;
+        private final ClientRepo clientRepo;
+        private final LocationRepo locationRepo;
 
-    private Map<String, String> workTypeToEmail = Map.of(
-            "Junk Removal", "ovramenko.nikitka@gmail.com",
-            "Appliance Repair", "tcspaintsfl@gmail.com");
+        private Map<String, String> workTypeToEmail = Map.of(
+                        "Junk Removal", "info@yourlocalservice.co",
+                        "Appliance Repair", "info@yourlocalservice.co");
 
-    public EmailService(JavaMailSender javaMailSender, ClientRepo clientRepo, LocationRepo locationRepo) {
-        this.javaMailSender = javaMailSender;
-        this.clientRepo = clientRepo;
-        this.locationRepo = locationRepo;
-    }
+        public EmailService(JavaMailSender javaMailSender, ClientRepo clientRepo, LocationRepo locationRepo) {
+                this.javaMailSender = javaMailSender;
+                this.clientRepo = clientRepo;
+                this.locationRepo = locationRepo;
+        }
 
-    @Transactional
-    public EmailDto sendFormResponseToClient(FormDto formDto) {
-        // -------------------------
-        // Create Client + Location Entities
-        // -------------------------
-        Client client = new Client();
-        List<Location> locations = new ArrayList<>();
-        Location location = new Location();
-        String sender = workTypeToEmail.get(formDto.workType());
+        @Transactional
+        public EmailDto sendFormResponseToClient(FormDto formDto) {
+                // -------------------------
+                // Create Client + Location Entities
+                // -------------------------
+                System.out.println("SMTP USER=" + System.getenv("EMAIL_SENDER"));
+                System.out.println("SMTP PASS length=" + System.getenv("SMTP_PASS").length());
+                Client client = new Client();
+                List<Location> locations = new ArrayList<>();
+                Location location = new Location();
+                String sender = workTypeToEmail.get(formDto.workType());
 
-        client.setEmail(formDto.email());
-        client.setName(formDto.name());
-        client.setLastname(formDto.lastname());
+                client.setEmail(formDto.email());
+                client.setName(formDto.name());
+                client.setLastname(formDto.lastname());
 
-        location.setCountry(Country.valueOf(formDto.country()));
-        location.setTown(formDto.town());
-        location.setStreet(formDto.street());
-        location.setPostalCode(formDto.postal_code());
+                location.setCountry(Country.valueOf(formDto.country()));
+                location.setTown(formDto.town());
+                location.setStreet(formDto.street());
+                location.setPostalCode(formDto.postal_code());
 
-        locations.add(location);
-        client.setLocations(locations);
-        location.setClient(client);
+                locations.add(location);
+                client.setLocations(locations);
+                location.setClient(client);
 
-        // Save to DB
-        clientRepo.save(client);
-        locationRepo.save(location);
+                // Save to DB
+                clientRepo.save(client);
+                locationRepo.save(location);
 
-        // -------------------------
-        // Email to Client
-        // -------------------------
-        SimpleMailMessage mailForCustomer = new SimpleMailMessage();
+                // -------------------------
+                // Email to Client
+                // -------------------------
+                SimpleMailMessage mailForCustomer = new SimpleMailMessage();
 
-        mailForCustomer.setFrom(sender);
-        mailForCustomer.setTo(formDto.email());
-        mailForCustomer.setSubject("Your Appointment Request Has Been Received");
+                mailForCustomer.setFrom(sender);
+                mailForCustomer.setTo(formDto.email());
+                mailForCustomer.setSubject("Your Appointment Request Has Been Received");
 
-        mailForCustomer.setText(
-                "Hi " + formDto.name() + ",\n\n" +
-                        "Thank you for submitting your appointment request.\n" +
-                        "Here are the details we received:\n\n" +
+                mailForCustomer.setText(
+                                "Hi " + formDto.name() + ",\n\n" +
+                                                "Thank you for submitting your appointment request.\n" +
+                                                "Here are the details we received:\n\n" +
 
-                        "Full Name: " + formDto.name() + " " + formDto.lastname() + "\n" +
-                        "Email: " + formDto.email() + "\n" +
-                        "Phone: " + formDto.phone() + "\n\n" +
+                                                "Full Name: " + formDto.name() + " " + formDto.lastname() + "\n" +
+                                                "Email: " + formDto.email() + "\n" +
+                                                "Phone: " + formDto.phone() + "\n\n" +
 
-                        "Requested Service Information:\n" +
-                        "• Work Type: " + formDto.workType() + "\n" +
-                        "• Service: " + formDto.service() + "\n" +
-                        "• Description: " + formDto.description() + "\n\n" +
+                                                "Requested Service Information:\n" +
+                                                "• Work Type: " + formDto.workType() + "\n" +
+                                                "• Service: " + formDto.service() + "\n" +
+                                                "• Description: " + formDto.description() + "\n\n" +
 
-                        "Location Details:\n" +
-                        "• Country: " + formDto.country() + "\n" +
-                        "• Town/City: " + formDto.town() + "\n" +
-                        "• Street: " + formDto.street() + "\n" +
-                        "• Postal Code: " + formDto.postal_code() + "\n\n" +
+                                                "Location Details:\n" +
+                                                "• Country: " + formDto.country() + "\n" +
+                                                "• Town/City: " + formDto.town() + "\n" +
+                                                "• Street: " + formDto.street() + "\n" +
+                                                "• Postal Code: " + formDto.postal_code() + "\n\n" +
 
-                        "We will contact you shortly to confirm the final appointment time.\n\n" +
-                        "Best regards,\n" +
-                        "TCS Paints Florida");
+                                                "We will contact you shortly to confirm the final appointment time.\n\n"
+                                                +
+                                                "Best regards,\n" +
+                                                "YourLocal" + formDto.workType().replaceAll("\\s+", ""));
 
-        javaMailSender.send(mailForCustomer);
+                javaMailSender.send(mailForCustomer);
 
-        // -------------------------
-        // Email to Business
-        // -------------------------
-        SimpleMailMessage mailForBusiness = new SimpleMailMessage();
-        mailForBusiness.setFrom(sender);
-        mailForBusiness.setTo(sender); // your own inbox
+                // -------------------------
+                // Email to Business
+                // -------------------------
+                SimpleMailMessage mailForBusiness = new SimpleMailMessage();
+                mailForBusiness.setFrom(sender);
+                mailForBusiness.setTo(sender); // your own inbox
 
-        mailForBusiness.setSubject("New Appointment Request Submitted");
+                mailForBusiness.setSubject("New Appointment Request Submitted");
 
-        mailForBusiness.setText(
-                "A new client has submitted an appointment request.\n\n" +
+                mailForBusiness.setText(
+                                "A new client has submitted an appointment request.\n\n" +
 
-                        "Client Information:\n" +
-                        "• Name: " + formDto.name() + " " + formDto.lastname() + "\n" +
-                        "• Email: " + formDto.email() + "\n" +
-                        "• Phone: " + formDto.phone() + "\n\n" +
+                                                "Client Information:\n" +
+                                                "• Name: " + formDto.name() + " " + formDto.lastname() + "\n" +
+                                                "• Email: " + formDto.email() + "\n" +
+                                                "• Phone: " + formDto.phone() + "\n\n" +
 
-                        "Requested Work Details:\n" +
-                        "• Work Type: " + formDto.workType() + "\n" +
-                        "• Service: " + formDto.service() + "\n" +
-                        "• Description: " + formDto.description() + "\n\n" +
+                                                "Requested Work Details:\n" +
+                                                "• Work Type: " + formDto.workType() + "\n" +
+                                                "• Service: " + formDto.service() + "\n" +
+                                                "• Description: " + formDto.description() + "\n\n" +
 
-                        "Location Details:\n" +
-                        "• Country: " + formDto.country() + "\n" +
-                        "• Town/City: " + formDto.town() + "\n" +
-                        "• Street: " + formDto.street() + "\n" +
-                        "• Postal Code: " + formDto.postal_code() + "\n\n" +
+                                                "Location Details:\n" +
+                                                "• Country: " + formDto.country() + "\n" +
+                                                "• Town/City: " + formDto.town() + "\n" +
+                                                "• Street: " + formDto.street() + "\n" +
+                                                "• Postal Code: " + formDto.postal_code() + "\n\n" +
 
-                        "You can now follow up with the client.");
+                                                "");
 
-        javaMailSender.send(mailForBusiness);
+                javaMailSender.send(mailForBusiness);
 
-        // -------------------------
-        // Return DTO
-        // -------------------------
-        return new EmailDto(
-                formDto.email(),
-                "Emails sent successfully.");
-    }
+                // -------------------------
+                // Return DTO
+                // -------------------------
+                return new EmailDto(
+                                formDto.email(),
+                                "Emails sent successfully.");
+        }
 
 }
