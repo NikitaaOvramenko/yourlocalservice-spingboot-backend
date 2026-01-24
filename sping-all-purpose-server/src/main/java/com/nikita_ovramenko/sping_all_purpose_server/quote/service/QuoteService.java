@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.nikita_ovramenko.sping_all_purpose_server.client.mapper.ClientMapper;
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
@@ -16,6 +17,7 @@ import com.nikita_ovramenko.sping_all_purpose_server.quote.dto.QuoteDto;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.mapper.QuoteMapper;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.model.Quote;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.repository.QuoteRepo;
+import com.nikita_ovramenko.sping_all_purpose_server.quote.status.QuoteStatus;
 
 @Service
 public class QuoteService {
@@ -35,45 +37,45 @@ public class QuoteService {
         this.emailService = emailService;
     }
 
+    @Transactional
     public QuoteDto save(QuoteDto quoteDto) {
 
         Quote q = quoteMapper.toEntity(quoteDto);
+        q.setStatus(QuoteStatus.BEGAN);
 
-        Client client = new Client();
-        Location location = new Location();
-        List<Location> locations = new ArrayList<>();
-
-        Country country = Country.valueOf(quoteDto.country());
-
-        location.setTown(quoteDto.town());
-        location.setCountry(country);
-        location.setStreet(quoteDto.street());
-        location.setPostalCode(quoteDto.postal_code());
-        locations.add(location);
+        Client client = clientRepo.findByEmail(quoteDto.email())
+                .orElseGet(Client::new);
 
         client.setEmail(quoteDto.email());
         client.setName(quoteDto.name());
         client.setLastname(quoteDto.lastname());
-        client.setLocations(locations);
         client.setPhone(quoteDto.phone());
+
+        if (client.getLocations() == null)
+            client.setLocations(new ArrayList<>());
+        if (client.getQuotes() == null)
+            client.setQuotes(new ArrayList<>());
+
+        Location location = new Location();
+        location.setTown(quoteDto.town());
+        location.setCountry(Country.valueOf(quoteDto.country()));
+        location.setStreet(quoteDto.street());
+        location.setPostalCode(quoteDto.postal_code());
+
+        location.setClient(client);
+        client.getLocations().add(location);
 
         q.setClient(client);
         q.setLocation(location);
+        client.getQuotes().add(q);
 
-        location.setClient(client);
+        Client savedClient = clientRepo.save(client);
 
-        List<Quote> quotes = new ArrayList<>();
-        quotes.add(q);
-        client.setQuotes(quotes);
+        emailService.sendFormResponseToClient(savedClient, location, q);
 
-        clientRepo.save(client);
-        locationRepo.save(location);
-        Quote saved = quoteRepo.save(q);
+        System.out.println("I was here !");
 
-        emailService.sendFormResponseToClient(client, location, q);
-
-        return quoteMapper.toDto(saved);
-
+        return quoteMapper.toDto(q);
     }
 
 }

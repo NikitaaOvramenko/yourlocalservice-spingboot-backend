@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
 import com.nikita_ovramenko.sping_all_purpose_server.client.repository.ClientRepo;
+import com.nikita_ovramenko.sping_all_purpose_server.file.FileService;
 import com.nikita_ovramenko.sping_all_purpose_server.location.enums.Country;
 import com.nikita_ovramenko.sping_all_purpose_server.location.model.Location;
 import com.nikita_ovramenko.sping_all_purpose_server.location.repository.LocationRepo;
@@ -22,17 +23,16 @@ import jakarta.transaction.Transactional;
 @Service
 public class EmailService {
         private final JavaMailSender javaMailSender;
-        private final ClientRepo clientRepo;
-        private final LocationRepo locationRepo;
+        private final FileService fileService;
 
         private Map<String, String> workTypeToEmail = Map.of(
                         "Junk Removal", "info@yourlocalservice.co",
                         "Appliance Repair", "info@yourlocalservice.co");
 
-        public EmailService(JavaMailSender javaMailSender, ClientRepo clientRepo, LocationRepo locationRepo) {
+        public EmailService(JavaMailSender javaMailSender, FileService fileService) {
                 this.javaMailSender = javaMailSender;
-                this.clientRepo = clientRepo;
-                this.locationRepo = locationRepo;
+                this.fileService = fileService;
+
         }
 
         @Transactional
@@ -90,6 +90,14 @@ public class EmailService {
 
                 mailForBusiness.setSubject("New Appointment Request Submitted");
 
+                List<String> imageLinks = new ArrayList<>();
+
+                List<String> imageNames = quote.getPictures();
+
+                for (String image : imageNames) {
+                        imageLinks.add(fileService.createPresignedGetLink(image));
+                }
+
                 mailForBusiness.setText(
                                 "A new client has submitted an appointment request.\n\n" +
 
@@ -107,7 +115,9 @@ public class EmailService {
                                                 "• Country: " + location.getCountry() + "\n" +
                                                 "• Town/City: " + location.getTown() + "\n" +
                                                 "• Street: " + location.getStreet() + "\n" +
-                                                "• Postal Code: " + location.getPostalCode() + "\n\n" +
+                                                "• Postal Code: " + location.getPostalCode() + "\n" +
+
+                                                "images: " + imageLinks.toString() + "\n\n" +
 
                                                 "");
 

@@ -19,8 +19,9 @@ public class QuoteMapper implements Mapper<Quote, QuoteDto> {
         Client client = q.getClient();
         Location location = q.getLocation();
         QuoteDto quoteDto = new QuoteDto(client.getName(), client.getLastname(), client.getLastname(),
-                client.getPhone(), q.getWorkType(), q.getServiceType().toString(), location.getCountry().toString(),
-                location.getTown(), location.getStreet(), location.getPostalCode(), q.getDescription());
+                client.getPhone(), q.getWorkType(), q.getServiceType(), location.getCountry().toString(),
+                location.getTown(), location.getStreet(), location.getPostalCode(), q.getDescription(),
+                q.getPictures());
 
         return quoteDto;
 
@@ -31,8 +32,9 @@ public class QuoteMapper implements Mapper<Quote, QuoteDto> {
 
         Quote q = new Quote();
         q.setDescription(d.description());
-        q.setServiceType(Arrays.stream(d.service().split(",")).toList());
+        q.setServiceType(d.service());
         q.setWorkType(d.workType());
+        q.setPictures(d.images());
 
         return q;
     }

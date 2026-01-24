@@ -5,11 +5,14 @@ import java.util.List;
 
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
 import com.nikita_ovramenko.sping_all_purpose_server.location.model.Location;
+import com.nikita_ovramenko.sping_all_purpose_server.quote.status.QuoteStatus;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -43,12 +46,13 @@ public class Quote {
     @Column(name = "pictures")
     private List<String> pictures = new ArrayList<>();
 
-    private String status;
+    @Enumerated(EnumType.STRING)
+    private QuoteStatus status;
 
     public Quote() {
     }
 
-    public Quote(long id, Client client, String description, String workType, String status, Location location) {
+    public Quote(long id, Client client, String description, String workType, QuoteStatus status, Location location) {
         this.id = id;
         this.client = client;
         this.description = description;
@@ -57,7 +61,7 @@ public class Quote {
         this.status = status;
     }
 
-    public Quote(Client client, String description, String workType, String status) {
+    public Quote(Client client, String description, String workType, QuoteStatus status) {
         this.client = client;
         this.description = description;
         this.workType = workType;
@@ -112,11 +116,11 @@ public class Quote {
         this.pictures = pictures;
     }
 
-    public String getStatus() {
+    public QuoteStatus getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(QuoteStatus status) {
         this.status = status;
     }
 
