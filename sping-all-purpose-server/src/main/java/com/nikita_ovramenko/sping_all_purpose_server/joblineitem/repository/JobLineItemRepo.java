@@ -9,6 +9,4 @@ import com.nikita_ovramenko.sping_all_purpose_server.joblineitem.model.JobLineIt
 
 @Repository
 public interface JobLineItemRepo extends JpaRepository<JobLineItem, Long> {
-
-    List<JobLineItem> findByJobId(Long jobId);
 }

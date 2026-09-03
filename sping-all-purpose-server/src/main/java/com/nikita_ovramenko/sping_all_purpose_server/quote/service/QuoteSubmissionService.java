@@ -92,12 +92,15 @@ public class QuoteSubmissionService {
         }
 
         Quote saved = quoteRepo.save(quote);
+        QuoteResponse response = quoteMapper.toResponse(saved);
 
         // Emails are sent by a listener after this transaction commits, so an SMTP
-        // failure can no longer discard a quote the client believes was submitted.
-        eventPublisher.publishEvent(new QuoteSubmittedEvent(saved.getId()));
+        // failure can no longer discard a quote the client believes was submitted. The
+        // event carries the finished response because it is built here, while the
+        // session is open -- the listener would otherwise be holding a detached entity.
+        eventPublisher.publishEvent(new QuoteSubmittedEvent(response, organization));
 
-        return quoteMapper.toResponse(saved);
+        return response;
     }
 
     private Client upsertClient(ClientRequest request) {

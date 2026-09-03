@@ -35,8 +35,8 @@ quote/           quotelineitem/
 job/             joblineitem/    review/
 
 common/     shared @MappedSuperclass (created_at / updated_at)
-web/        @RestControllerAdvice returning RFC 9457 ProblemDetail
-email/ file/ configuration/                    supporting services, not aggregates
+email/ file/ configuration/     supporting services, not aggregates
+web/                            @RestControllerAdvice, RFC 9457 ProblemDetail
 ```
 
 Line items are not aggregate roots — they have no controller and no service, because
@@ -241,8 +241,11 @@ Note `service` and `images` are **arrays**.
 > `404`. Point the frontends at `POST /api/orgs/{slug}/quotes` instead.
 
 Other behaviour changes: an unrecognised `workType` is a `404` rather than silently
-sending mail with no `From` address, and the response's `to` field now contains the
-client's email (it previously returned their last name, due to a mapper bug).
+sending mail with no `From` address; the response's `to` field now contains the client's
+email (it previously returned their last name, due to a mapper bug); and `message` is
+now `"Request received"` rather than `"Email Sent Successfully !"`, which had stopped
+being true once mail moved off the request thread. **Check no frontend string-matches
+that message before deploying.**
 
 ### Errors
 
@@ -321,8 +324,55 @@ WHERE slug = 'tcs';
 ```
 
 There is no failover: the configured account is used, and a failure is logged without
-touching the already-committed quote. Sending is still synchronous, so a dead SMTP host
-adds its connect timeout to the HTTP response — the reason to add `@Async` eventually.
+touching the already-committed quote.
+
+Sending happens **after the transaction commits and on a background thread**, so neither
+a slow SMTP host nor a failing one affects the client.
+
+`QuoteSubmissionService` publishes a `QuoteSubmittedEvent` carrying the finished
+`QuoteResponse` and the `Organization` — both assembled while the transaction is still
+open. `QuoteEmailListener` picks it up with `@Async` + `@TransactionalEventListener(AFTER_COMMIT)`
+and hands it to `EmailService`. There is no transaction and no repository in that path:
+the event already holds everything the email needs, so nothing is ever detached and
+nothing lazy-loads.
+
+Two consequences worth knowing:
+
+- `Organization` deliberately has **no collections**. That is what makes it safe to
+  carry on an event and read after the session closes; adding a `@OneToMany` to it would
+  break mail delivery at runtime rather than at compile time.
+- `EmailService` takes DTOs, not entities, so it is a plain unit test with no Spring
+  context and no database — see `EmailServiceTest`.
+
+Jakarta Mail defaults every socket timeout to **infinite**. `connectiontimeout`,
+`timeout` and `writetimeout` are set (10s) both in `application.properties` and in the
+per-org senders, or a host that accepts a connection then goes quiet would occupy a
+mail thread forever.
+
+The pool is deliberately small and bounded — 2 core, 4 max, 100 queued, `CallerRunsPolicy`
+so a flood degrades to synchronous sending rather than dropping mail, and
+`waitForTasksToCompleteOnShutdown` so in-flight emails finish on restart. Emails queued
+at a hard kill are still lost; a real delivery guarantee would need an outbox table.
+
+**You need one variable per distinct SMTP account, not per organization.** Today that
+is one: the three `yourlocalservice.co` brands share a mailbox and leave their SMTP
+columns NULL, so only TCS needs `SMTP_PASS_TCS`.
+
+**Where this design runs out.** Env-var references are deliberately sized for a handful
+of organizations — every new sending account needs a deploy to add its variable. Past
+roughly ten, switch to one of:
+
+- *If the orgs are all your own brands:* one provider (SES/Postmark) with every domain
+  verified, and `From` set per message. The `smtp_*` credential columns disappear
+  entirely; only `from_email` and `from_name` remain. Adding an org becomes an `INSERT`
+  plus a DNS record.
+- *If each org brings its own mailbox:* encrypt the password in the row (AES-GCM via a
+  JPA `AttributeConverter`, master key in the environment). Adding an org becomes an
+  `INSERT` with no deploy, at the cost of owning key rotation.
+
+Either is a contained change — an `AttributeConverter` or dropping columns — not a
+redesign, because the settings already live on `organization` rather than being
+scattered through configuration.
 
 ## Getting started
 

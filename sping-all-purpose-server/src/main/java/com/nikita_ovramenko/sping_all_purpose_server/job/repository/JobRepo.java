@@ -17,8 +17,4 @@ public interface JobRepo extends JpaRepository<Job, Long> {
      * mapping it would make Hibernate select the job on every single quote load.
      */
     Optional<Job> findByQuoteId(Long quoteId);
-
-    List<Job> findByClientId(Long clientId);
-
-    List<Job> findByOrganizationId(Long organizationId);
 }

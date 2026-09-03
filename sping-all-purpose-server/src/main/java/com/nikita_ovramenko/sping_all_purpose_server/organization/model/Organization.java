@@ -17,6 +17,10 @@ import lombok.Setter;
  * <p>Replaces the free-text Quote.workType string and the hardcoded workTypeToEmail
  * map that used to live in EmailService. contact_email is the business inbox that
  * used to be a value in that map.
+ *
+ * <p>Deliberately has no collections. That keeps it safe to read while detached,
+ * which QuoteSubmittedEvent relies on -- adding a @OneToMany here would break the
+ * email listener at runtime, not at compile time.
  */
 @Entity
 @Table(name = "organization")

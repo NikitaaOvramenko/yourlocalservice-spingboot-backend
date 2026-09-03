@@ -22,6 +22,8 @@ import com.nikita_ovramenko.sping_all_purpose_server.organization.model.Organiza
 @Component
 public class OrganizationMailSenderResolver {
 
+    private static final int SOCKET_TIMEOUT_MS = 10_000;
+
     private final JavaMailSender defaultSender;
     private final MailProperties defaultMailProperties;
     private final Environment environment;
@@ -74,6 +76,13 @@ public class OrganizationMailSenderResolver {
         props.put("mail.smtp.auth", "true");
         props.put("mail.smtp.ssl.enable", String.valueOf(Boolean.TRUE.equals(settings.getSslEnabled())));
         props.put("mail.smtp.starttls.enable", String.valueOf(Boolean.TRUE.equals(settings.getStarttlsEnabled())));
+
+        // Jakarta Mail defaults every socket timeout to INFINITE. Without these, a host
+        // that accepts the connection and then goes silent occupies a pool thread
+        // forever rather than failing and freeing it.
+        props.put("mail.smtp.connectiontimeout", String.valueOf(SOCKET_TIMEOUT_MS));
+        props.put("mail.smtp.timeout", String.valueOf(SOCKET_TIMEOUT_MS));
+        props.put("mail.smtp.writetimeout", String.valueOf(SOCKET_TIMEOUT_MS));
         return sender;
     }
 }

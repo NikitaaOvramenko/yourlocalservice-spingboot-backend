@@ -9,6 +9,4 @@ import com.nikita_ovramenko.sping_all_purpose_server.quotelineitem.model.QuoteLi
 
 @Repository
 public interface QuoteLineItemRepo extends JpaRepository<QuoteLineItem, Long> {
-
-    List<QuoteLineItem> findByQuoteId(Long quoteId);
 }

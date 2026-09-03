@@ -10,8 +10,4 @@ import com.nikita_ovramenko.sping_all_purpose_server.review.model.Review;
 
 @Repository
 public interface ReviewRepo extends JpaRepository<Review, Long> {
-
-    Optional<Review> findByJobId(Long jobId);
-
-    List<Review> findByJob_OrganizationId(Long organizationId);
 }
