@@ -1,32 +1,37 @@
 package com.nikita_ovramenko.sping_all_purpose_server.email;
 
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nikita_ovramenko.sping_all_purpose_server.quote.dto.QuoteDto;
-import com.nikita_ovramenko.sping_all_purpose_server.quote.service.QuoteService;
+import com.nikita_ovramenko.sping_all_purpose_server.quote.service.LegacyQuoteAdapter;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-
+/**
+ * Deprecated submission endpoint kept for the currently deployed frontends.
+ *
+ * <p>The wire format is unchanged; LegacyQuoteAdapter maps it onto the new model and
+ * calls the same submission service as POST /api/orgs/{slug}/quotes. New clients
+ * should use that instead.
+ */
 @RestController
 @RequestMapping("/api")
 public class EmailController {
 
-    private final QuoteService quoteService;
+    private final LegacyQuoteAdapter legacyQuoteAdapter;
 
-    public EmailController(QuoteService quoteService) {
-        this.quoteService = quoteService;
+    public EmailController(LegacyQuoteAdapter legacyQuoteAdapter) {
+        this.legacyQuoteAdapter = legacyQuoteAdapter;
     }
 
+    @Deprecated
     @PostMapping("/email/form")
     public ResponseEntity<EmailDto> quoteSubmission(@RequestBody QuoteDto quoteDto) {
-        QuoteDto quoteDto2 = quoteService.save(quoteDto);
-        EmailDto emailDto = new EmailDto(quoteDto2.email(), "Email Sent Successfully !");
-        return ResponseEntity.ok(emailDto);
+        legacyQuoteAdapter.submit(quoteDto);
+        // The client's own email, not (as previously) their last name: the old mapper
+        // put getLastname() in the email slot of the DTO this was read from.
+        return ResponseEntity.ok(new EmailDto(quoteDto.email(), "Email Sent Successfully !"));
     }
-
 }

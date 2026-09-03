@@ -9,5 +9,6 @@ import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
 
 @Repository
 public interface ClientRepo extends JpaRepository<Client, Long> {
-    Optional<Client> findByEmail(String email);
+
+    Optional<Client> findByEmailIgnoreCase(String email);
 }
