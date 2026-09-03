@@ -344,6 +344,30 @@ Two consequences worth knowing:
 - `EmailService` takes DTOs, not entities, so it is a plain unit test with no Spring
   context and no database — see `EmailServiceTest`.
 
+### Quote photos
+
+The business notification is `multipart/mixed` with a plain-text and an HTML
+alternative. Photos are **attached inline** (referenced by `cid:`) up to a **5MB** raw
+budget; anything beyond it, or that cannot be read from S3, degrades to a presigned
+link instead of being dropped.
+
+Why a budget rather than attaching everything: MIME base64-encodes attachments, adding
+about a third, and `emailTaskExecutor` runs up to 4 sends at once — each holding its
+bytes plus an encoded copy. 5MB caps the worst case at roughly 4 × 5MB of raw photo
+data in flight. Raise it only alongside the heap.
+
+Sizes are checked with `headObject` before any download, so a quote with thirty photos
+does not pull thirty files down to attach three.
+
+**Presigned GET links last 7 days** — SigV4's hard maximum. There is no longer option
+and no "never expires"; permanent access is exactly why photos are attached rather than
+only linked. They were previously 60 minutes, which meant an evening quote had dead
+photo links by morning.
+
+The plain-text alternative lists every photo as a link, since text cannot render an
+inline image. Note Outlook tends to also show inline images in its attachment tray —
+cosmetic, and not controllable from the sending side.
+
 Jakarta Mail defaults every socket timeout to **infinite**. `connectiontimeout`,
 `timeout` and `writetimeout` are set (10s) both in `application.properties` and in the
 per-org senders, or a host that accepts a connection then goes quiet would occupy a
