@@ -35,6 +35,9 @@ public class FileService {
      */
     private static final Duration GET_LINK_TTL = Duration.ofDays(7);
 
+    /** Long enough for a large photo over a slow mobile connection. */
+    private static final Duration PUT_LINK_TTL = Duration.ofMinutes(10);
+
     @Value("${spring.app.aws_bucket_name}")
     private String bucketName;
 
@@ -60,7 +63,9 @@ public class FileService {
                     .build();
 
             PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
-                    .signatureDuration(Duration.ofSeconds(60)) // The URL expires in 60 seconds.
+                    // Was 60 seconds, which is not enough for a phone photo on cellular --
+                    // a plausible cause of uploads that failed with no visible error.
+                    .signatureDuration(PUT_LINK_TTL)
                     .putObjectRequest(objectRequest)
                     .build();
 

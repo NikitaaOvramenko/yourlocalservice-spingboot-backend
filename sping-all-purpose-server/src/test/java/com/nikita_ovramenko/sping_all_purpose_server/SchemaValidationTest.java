@@ -12,6 +12,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import com.nikita_ovramenko.sping_all_purpose_server.organization.model.MailSettings;
 import com.nikita_ovramenko.sping_all_purpose_server.organization.repository.OrganizationRepo;
 import com.nikita_ovramenko.sping_all_purpose_server.organizationserviceoffering.repository.OrganizationServiceOfferingRepo;
 
@@ -46,11 +47,11 @@ class SchemaValidationTest extends AbstractPostgresTest {
     }
 
     @Test
-    void bothMigrationsApplied() {
+    void allMigrationsApplied() {
         List<String> versions = jdbcTemplate.queryForList(
                 "select version from flyway_schema_history where success = true order by installed_rank",
                 String.class);
-        assertThat(versions).containsExactly("1", "2", "3");
+        assertThat(versions).containsExactly("1", "2", "3", "4");
     }
 
     @Test
@@ -105,16 +106,32 @@ class SchemaValidationTest extends AbstractPostgresTest {
                 .toList();
     }
 
-    /**
-     * V3 ships every org unconfigured, so they all keep using the global spring.mail.*
-     * sender and this migration changes no behaviour on its own.
+/**
+     * TCS is on gmail.com, which we cannot sign for, so V4 gives it its own sending
+     * account. Being a migration rather than a manual UPDATE is the point: it survives
+     * a database reset.
      */
     @Test
-    void orgsShipWithNoOwnMailSettings() {
-        assertThat(organizationRepo.findBySlugIgnoreCase("tcs").orElseThrow().getMailSettings())
-                .satisfiesAnyOf(
-                        ms -> assertThat(ms).isNull(),
-                        ms -> assertThat(ms.isConfigured()).isFalse());
+    void tcsSendsThroughItsOwnAccount() {
+        MailSettings mail = organizationRepo.findBySlugIgnoreCase("tcs").orElseThrow().getMailSettings();
+
+        assertThat(mail).isNotNull();
+        assertThat(mail.isConfigured()).isTrue();
+        assertThat(mail.getHost()).isEqualTo("smtp.gmail.com");
+        assertThat(mail.formattedFrom()).isEqualTo("TCS <tcs.ontario@gmail.com>");
+        // The variable's NAME, never the secret itself.
+        assertThat(mail.getPasswordEnv()).isEqualTo("SMTP_PASS_TCS");
+    }
+
+    /** The three yourlocalservice brands share a mailbox and stay on the global sender. */
+    @Test
+    void yourlocalserviceOrgsStayOnTheGlobalSender() {
+        for (String slug : new String[] { "yourlocalpaints", "yourlocalhandyman", "yourlocaljunkremoval" }) {
+            MailSettings mail = organizationRepo.findBySlugIgnoreCase(slug).orElseThrow().getMailSettings();
+            assertThat(mail == null || !mail.isConfigured())
+                    .as("%s must use the application-wide sender", slug)
+                    .isTrue();
+        }
     }
 
     /** Half-configured mail would only fail at send time, after the quote is committed. */

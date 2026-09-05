@@ -212,9 +212,36 @@ below — a request naming a service the organization does not offer is rejected
 
 ### Upload a photo
 
-`GET /api/upload/{name}` → `{ "url": "<presigned S3 PUT URL>" }`
+`POST /api/orgs/{slug}/uploads` with `{ "fileName": "basement.jpg" }`
+→ `{ "key": "orgs/tcs/quotes/2026/09/04/<uuid>-basement.jpg", "url": "<presigned S3 PUT URL>" }`
 
-PUT the file to that URL, then pass `{name}` in `pictureKeys` on the quote.
+PUT the file to `url`, then pass the returned `key` in the quote's `pictureKeys`. One
+call per file. The presigned PUT is valid for 10 minutes.
+
+**The client never constructs the key.** The prefix comes from the resolved org slug and
+uniqueness from a server-generated UUID, so a caller cannot address another
+organization's prefix — only the file name is client-supplied, and it is sanitised
+(anything outside `\p{L}\p{N}._-` collapsed to `-`, dot runs collapsed, truncated
+keeping the extension).
+
+This replaces `GET /api/upload/{name}`, which signed whatever key arrived — meaning any
+caller could overwrite any object in the bucket. A POST body also avoids the fact that
+Tomcat rejects `%2F` inside a path segment with a 400, so a slash-bearing key could not
+travel in the URL at all.
+
+Key shape is `orgs/<slug>/quotes/<yyyy>/<MM>/<dd>/<uuid>-<name>`:
+
+- the **`quotes`** segment lets an S3 lifecycle rule target quote photos alone — a rule
+  scoped to `orgs/tcs/quotes/` expires them without touching anything else that org
+  keeps in the bucket;
+- the **date** is zero-padded so objects sort chronologically in the console, and is
+  **UTC** — deterministic, no DST edges, consistent across orgs in several countries.
+  The cost is an off-by-one (an 8pm EDT quote files under the next day), which is fine
+  because `quote.created_at` is the authoritative timestamp and real lookups go through
+  SQL. Per-org timezones would be a column on `organization`, not a constant.
+
+Nothing reads the key's shape — `object_key` stores it verbatim, so objects written
+under older shapes keep resolving and there is nothing to backfill.
 
 ### Submit a quote (deprecated)
 
@@ -312,15 +339,20 @@ variable; the secret stays in the environment, so database dumps carry no creden
 The cost is that onboarding an org with its own sender needs that variable added to the
 deployment.
 
-To move TCS onto its own free Gmail sender — set `SMTP_PASS_TCS` to a Google
-**app password** (not the account password), then:
+TCS is already configured this way by `V4__configure_tcs_mail_sender.sql`, so it
+survives a database reset. All it needs from the environment is **`SMTP_PASS_TCS`**, set
+to a Google *app password* (2-Step Verification must be on for the account — the option
+does not appear otherwise). Without that variable TCS's business notification fails and
+is logged; quotes are unaffected, since mail is sent after commit.
+
+Onboarding another organization onto its own sender is an `UPDATE` in a new migration
+plus one environment variable:
 
 ```sql
-UPDATE organization SET smtp_host = 'smtp.gmail.com', smtp_port = 587,
-    smtp_username = 'tcs.ontario@gmail.com', smtp_password_env = 'SMTP_PASS_TCS',
-    smtp_ssl_enabled = FALSE, smtp_starttls_enabled = TRUE,
-    from_email = 'tcs.ontario@gmail.com', from_name = 'TCS'
-WHERE slug = 'tcs';
+UPDATE organization SET smtp_host = '...', smtp_port = 587, smtp_username = '...',
+    smtp_password_env = 'SMTP_PASS_SOMEORG', smtp_ssl_enabled = FALSE,
+    smtp_starttls_enabled = TRUE, from_email = '...', from_name = '...'
+WHERE slug = '...';
 ```
 
 There is no failover: the configured account is used, and a failure is logged without
@@ -480,8 +512,8 @@ Tracked deliberately rather than silently:
    is no `GET /quotes/{id}` — a sequential id on an unauthenticated read endpoint would
    let anyone enumerate clients' names, emails, phones and addresses.
 2. **No rate limiting.** Quote submission is unauthenticated and sends two emails.
-3. **`GET /api/upload/{name}`** issues a presigned PUT for a caller-controlled object
-   key. Keys should be server-generated.
+3. ~~`GET /api/upload/{name}` issues a presigned PUT for a caller-controlled object
+   key.~~ Fixed — keys are now server-constructed by `POST /api/orgs/{slug}/uploads`.
 4. **No currency**, despite `Country` spanning the USA and Canada; and a quote stores
    no frozen total, so an accepted quote's total must be recomputed from lines that may
    have changed since.
