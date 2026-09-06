@@ -25,6 +25,14 @@ public interface OrganizationServiceOfferingRepo
     Set<Long> findServiceIdsByOrganizationId(@Param("orgId") Long orgId);
 
     /**
+     * Every offering row for one organization, active or not.
+     *
+     * <p>Distinct from the public listing below, which filters on active: this backs the
+     * admin screen, where seeing a deactivated service is the point.
+     */
+    List<OrganizationServiceOffering> findAllByOrganizationId(Long organizationId);
+
+    /**
      * Public catalog for one org's site. Scoped through the join table on purpose: a
      * plain findAll() on ServiceOffering would leak every org's catalog to every page.
      */

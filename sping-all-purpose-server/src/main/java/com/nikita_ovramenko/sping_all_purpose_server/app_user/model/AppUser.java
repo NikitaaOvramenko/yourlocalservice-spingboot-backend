@@ -1,4 +1,8 @@
-package com.nikita_ovramenko.sping_all_purpose_server.app_user;
+package com.nikita_ovramenko.sping_all_purpose_server.app_user.model;
+
+import com.nikita_ovramenko.sping_all_purpose_server.app_user.enums.Role;
+
+import com.nikita_ovramenko.sping_all_purpose_server.app_user.enums.Role;
 
 import jakarta.persistence.*;
 import lombok.*;

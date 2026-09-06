@@ -5,22 +5,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.nikita_ovramenko.sping_all_purpose_server.client.dto.ClientRequest;
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
-import com.nikita_ovramenko.sping_all_purpose_server.client.repository.ClientRepo;
+import com.nikita_ovramenko.sping_all_purpose_server.client.service.ClientResolver;
 import com.nikita_ovramenko.sping_all_purpose_server.location.model.Location;
 import com.nikita_ovramenko.sping_all_purpose_server.location.service.LocationResolver;
 import com.nikita_ovramenko.sping_all_purpose_server.organization.model.Organization;
 import com.nikita_ovramenko.sping_all_purpose_server.organization.service.OrganizationLookup;
-import com.nikita_ovramenko.sping_all_purpose_server.organizationserviceoffering.exception.ServiceNotOfferedException;
-import com.nikita_ovramenko.sping_all_purpose_server.organizationserviceoffering.repository.OrganizationServiceOfferingRepo;
+import com.nikita_ovramenko.sping_all_purpose_server.organizationserviceoffering.service.OfferedServiceResolver;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.dto.QuoteRequest;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.dto.QuoteResponse;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.enums.QuoteStatus;
@@ -30,9 +26,7 @@ import com.nikita_ovramenko.sping_all_purpose_server.quote.model.Quote;
 import com.nikita_ovramenko.sping_all_purpose_server.quote.repository.QuoteRepo;
 import com.nikita_ovramenko.sping_all_purpose_server.quotelineitem.dto.QuoteLineItemRequest;
 import com.nikita_ovramenko.sping_all_purpose_server.quotelineitem.model.QuoteLineItem;
-import com.nikita_ovramenko.sping_all_purpose_server.serviceoffering.exception.UnknownServiceException;
 import com.nikita_ovramenko.sping_all_purpose_server.serviceoffering.model.ServiceOffering;
-import com.nikita_ovramenko.sping_all_purpose_server.serviceoffering.repository.ServiceOfferingRepo;
 
 /**
  * The single write path for quote submissions. Both the new
@@ -42,35 +36,69 @@ import com.nikita_ovramenko.sping_all_purpose_server.serviceoffering.repository.
 public class QuoteSubmissionService {
 
     private final QuoteRepo quoteRepo;
-    private final ClientRepo clientRepo;
-    private final ServiceOfferingRepo serviceOfferingRepo;
-    private final OrganizationServiceOfferingRepo organizationServiceOfferingRepo;
+    private final ClientResolver clientResolver;
+    private final OfferedServiceResolver offeredServiceResolver;
     private final OrganizationLookup organizationLookup;
     private final LocationResolver locationResolver;
     private final QuoteMapper quoteMapper;
     private final ApplicationEventPublisher eventPublisher;
 
-    public QuoteSubmissionService(QuoteRepo quoteRepo, ClientRepo clientRepo,
-            ServiceOfferingRepo serviceOfferingRepo,
-            OrganizationServiceOfferingRepo organizationServiceOfferingRepo,
+    public QuoteSubmissionService(QuoteRepo quoteRepo, ClientResolver clientResolver,
+            OfferedServiceResolver offeredServiceResolver,
             OrganizationLookup organizationLookup, LocationResolver locationResolver,
             QuoteMapper quoteMapper, ApplicationEventPublisher eventPublisher) {
         this.quoteRepo = quoteRepo;
-        this.clientRepo = clientRepo;
-        this.serviceOfferingRepo = serviceOfferingRepo;
-        this.organizationServiceOfferingRepo = organizationServiceOfferingRepo;
+        this.clientResolver = clientResolver;
+        this.offeredServiceResolver = offeredServiceResolver;
         this.organizationLookup = organizationLookup;
         this.locationResolver = locationResolver;
         this.quoteMapper = quoteMapper;
         this.eventPublisher = eventPublisher;
     }
 
+    /**
+     * A member of the public submitting the web form. Persists the quote and triggers
+     * the confirmation and lead-notification emails.
+     */
     @Transactional
     public QuoteResponse submit(String orgSlug, QuoteRequest request) {
         Organization organization = organizationLookup.requireBySlug(orgSlug);
-        Client client = upsertClient(request.client());
+        Quote saved = createQuote(organization, request);
+        QuoteResponse response = quoteMapper.toResponse(saved);
+
+        // Emails are sent by a listener after this transaction commits, so an SMTP
+        // failure can no longer discard a quote the client believes was submitted. The
+        // event carries the finished response because it is built here, while the
+        // session is open -- the listener would otherwise be holding a detached entity.
+        eventPublisher.publishEvent(new QuoteSubmittedEvent(response, organization));
+
+        return response;
+    }
+
+    /**
+     * Staff entering a lead that arrived by phone or in person.
+     *
+     * <p>Identical to {@link #submit} except that it publishes no event, and so sends no
+     * mail. That difference is the entire point: a client who never filled in the web
+     * form must not receive "thanks for your request", and the business does not need a
+     * new-lead notification about a lead it just typed in itself.
+     */
+    @Transactional
+    public QuoteResponse createForStaff(String orgSlug, QuoteRequest request) {
+        Organization organization = organizationLookup.requireBySlug(orgSlug);
+        return quoteMapper.toResponse(createQuote(organization, request));
+    }
+
+    /**
+     * Everything both entry points share: client upsert, location dedup, service
+     * validation, and persistence. Kept private so the only difference between a public
+     * submission and a staff entry stays visible in the two methods above.
+     */
+    private Quote createQuote(Organization organization, QuoteRequest request) {
+        Client client = clientResolver.upsert(request.client());
         Location location = locationResolver.resolve(client, request.location());
-        Map<Long, ServiceOffering> services = resolveOfferedServices(organization, request.services());
+        Map<Long, ServiceOffering> services = offeredServiceResolver.requireAllOffered(
+                organization, request.services().stream().map(QuoteLineItemRequest::serviceId).toList());
 
         Quote quote = new Quote();
         quote.setOrganization(organization);
@@ -91,61 +119,7 @@ public class QuoteSubmissionService {
             quote.getPictures().addAll(request.pictureKeys());
         }
 
-        Quote saved = quoteRepo.save(quote);
-        QuoteResponse response = quoteMapper.toResponse(saved);
-
-        // Emails are sent by a listener after this transaction commits, so an SMTP
-        // failure can no longer discard a quote the client believes was submitted. The
-        // event carries the finished response because it is built here, while the
-        // session is open -- the listener would otherwise be holding a detached entity.
-        eventPublisher.publishEvent(new QuoteSubmittedEvent(response, organization));
-
-        return response;
-    }
-
-    private Client upsertClient(ClientRequest request) {
-        Client client = clientRepo.findByEmailIgnoreCase(request.email()).orElseGet(Client::new);
-        // NOTE: this overwrites an existing client's details on every submission, which
-        // is the pre-existing behaviour. With no authentication it means anyone who
-        // knows an email address can rewrite that person's record. Left as-is here;
-        // it belongs with the auth work rather than this refactor.
-        client.setEmail(request.email());
-        client.setFirstName(request.firstName());
-        client.setLastName(request.lastName());
-        client.setPhone(request.phone());
-        return clientRepo.save(client);
-    }
-
-    /**
-     * Loads the requested services and checks the organization actually offers them.
-     * Two distinct failures: unknown to the catalog entirely (400) versus real but not
-     * offered by this organization (422).
-     */
-    private Map<Long, ServiceOffering> resolveOfferedServices(
-            Organization organization, List<QuoteLineItemRequest> requested) {
-
-        Set<Long> requestedIds = requested.stream()
-                .map(QuoteLineItemRequest::serviceId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-
-        List<ServiceOffering> found = serviceOfferingRepo.findAllById(requestedIds);
-        // findAllById silently drops ids it cannot find, so the size check is required.
-        if (found.size() != requestedIds.size()) {
-            Set<Long> foundIds = found.stream().map(ServiceOffering::getId).collect(Collectors.toSet());
-            Set<Long> unknown = new LinkedHashSet<>(requestedIds);
-            unknown.removeAll(foundIds);
-            throw new UnknownServiceException(unknown);
-        }
-
-        Set<Long> offeredIds = organizationServiceOfferingRepo
-                .findServiceIdsByOrganizationId(organization.getId());
-        Set<Long> notOffered = new LinkedHashSet<>(requestedIds);
-        notOffered.removeAll(offeredIds);
-        if (!notOffered.isEmpty()) {
-            throw new ServiceNotOfferedException(organization.getSlug(), notOffered);
-        }
-
-        return found.stream().collect(Collectors.toMap(ServiceOffering::getId, Function.identity()));
+        return quoteRepo.save(quote);
     }
 
     /** uq_quote_service forbids the same service twice on one quote; keep the first mention. */

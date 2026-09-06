@@ -39,10 +39,9 @@ email/ file/ configuration/     supporting services, not aggregates
 web/                            @RestControllerAdvice, RFC 9457 ProblemDetail
 ```
 
-Line items are not aggregate roots — they have no controller and no service, because
-they are created and deleted through their parent (`Quote` / `Job`) via cascade. Their
-folders carry only `model/`, `repository/`, and (for `quotelineitem/`) the request and
-response DTOs nested inside the quote payload.
+Line items are managed through nested admin controllers and services under their
+parent quote or job. Ownership checks prevent an item from being edited through a
+different parent's URL.
 
 ### Entity-Relationship Diagram
 
@@ -210,6 +209,55 @@ below — a request naming a service the organization does not offer is rejected
 
 `GET /api/orgs/{slug}` → `{ "id", "name", "slug" }`
 
+### Authentication
+
+Stateless JWT. `POST /api/auth/login` returns an access token (1h), a refresh token
+(7d) and the user; send the access token as `Authorization: Bearer <token>`.
+
+| Endpoint | Auth | Notes |
+| :--- | :--- | :--- |
+| `POST /api/auth/register` | public | Creates an **unverified** account — see below |
+| `POST /api/auth/login` | public | `{email, password}` → `{accessToken, refreshToken, user}` |
+| `POST /api/auth/refresh` | public | `{refreshToken}` → a fresh pair |
+| `GET /api/auth/me` | bearer | The authenticated user |
+
+**Authorization is deny-by-default.** Only the customer-facing quote funnel is public —
+quote submission, upload minting, the org catalog, the legacy form endpoint, and
+`/actuator/health`. Anything else, *including any endpoint added later*, requires a
+token. That is the point: new admin endpoints are protected unless someone deliberately
+opens them.
+
+Failed logins return the same `401 Incorrect email or password` whether the address
+exists or not, so the endpoint cannot be used to discover which emails have accounts.
+
+#### Email verification
+
+Registration creates the account with `verified = false` and emails a link; login
+rejects unverified accounts with `403` until it is followed.
+
+| Endpoint | Auth | Notes |
+| :--- | :--- | :--- |
+| `POST /api/auth/verify/send` | public | `{email}` — resend a link |
+| `GET /api/auth/verify/{token}` | public | Followed from the email; plain-text response |
+
+A token is a random UUID row in `email_verification` with an expiry, and is **single
+use**: it is deleted when followed, and deleted when an expired one is presented, so the
+table only ever holds outstanding links. Issuing a new link clears the previous one, so
+a user never has two live tokens.
+
+`POST /verify/send` answers identically whether or not the address has an account —
+otherwise it would be a way to ask "is this person registered here?", which the login
+endpoint already avoids leaking.
+
+An expired link returns `410 Gone` rather than `400`, so a client can tell "this link
+died" from "this link is wrong" and offer a resend.
+
+Configure with **`VERIFICATION_BASE_URL`** (must be the public URL — a localhost value
+means every emailed link is dead on arrival) and `VERIFICATION_TTL_MINUTES` (default 60).
+
+The seeded admin from `ADMIN_PASSWORD` starts verified, so there is always one account
+that can sign in.
+
 ### Upload a photo
 
 `POST /api/orgs/{slug}/uploads` with `{ "fileName": "basement.jpg" }`
@@ -279,6 +327,83 @@ that message before deploying.**
 Failures return RFC 9457 `ProblemDetail`. `400` invalid body or unknown service,
 `404` unknown organization slug, `409` data conflict, `422` service exists but is not
 offered by that organization.
+
+### Admin API
+
+Every route below starts with `/api/admin` and requires an **ADMIN** bearer token.
+Access is global across organizations. Anonymous callers receive 401; authenticated
+members receive 403. The public `/api/orgs/**` routes never return admin quote or job lists.
+
+| Resource | Endpoints | Behavior |
+| :--- | :--- | :--- |
+| Quotes | `GET/POST /quotes`, `GET/PATCH /quotes/{id}` | List/filter, enter phone leads, edit status, description and expiry |
+| Quote items | `GET/POST /quotes/{quoteId}/items`, `PATCH/DELETE /quotes/{quoteId}/items/{itemId}` | Price, edit and remove lines |
+| Jobs | `GET/POST /jobs`, `GET/PATCH /jobs/{id}` | Convert quotes or enter walk-in work; update status and schedule |
+| Job items | `GET/POST /jobs/{jobId}/items`, `PATCH/DELETE /jobs/{jobId}/items/{itemId}` | Price and track individual services |
+| Users | `GET/POST /users`, `GET/PATCH/DELETE /users/{id}`, `POST /users/{id}/verify` | Create accounts, change roles, force verification and delete |
+| Organizations | `GET/POST /organizations`, `GET/PATCH /organizations/{id}` | Includes inactive businesses and mail settings |
+| Organization services | `GET/PUT /organizations/{id}/services` | Includes inactive services; PUT replaces the set using `{"serviceIds":[1,2]}` |
+| Service catalogue | `GET/POST /services`, `PATCH /services/{id}` | Includes inactive entries; create or edit catalogue services |
+
+Quote and job lists accept `orgSlug`, `status`, and `clientEmail`; user lists accept
+`role` and `verified`. These lists accept `page` (zero-based), `size`, and
+`sort` (for example, `createdAt,desc`) and return
+`{content, page, size, totalElements, totalPages}`. Quote/job lists contain summaries;
+the individual GET endpoints contain client, location and line-item details.
+
+**PATCH:** omitted or null fields stay unchanged, including nested mail fields.
+Nullable values cannot be cleared with null. Any valid status enum is accepted; there
+is no state machine. Quotes and jobs have no DELETE: use quote status `DECLINED` or
+`EXPIRED`, and job status `CANCELLED`. Organizations and catalogue services are
+retired with `{"active":false}`.
+
+Create an admin quote with `{"orgSlug":"tcs","quote":{...}}`, where `quote` is the
+public submission body shown above. **This path sends no email.** Public submissions
+continue to send the confirmation and business notification after commit.
+
+Create a job from a quote:
+
+```json
+{"quoteId":42,"scheduledAt":"2026-10-01T14:00:00Z"}
+```
+
+This copies the client, organization, location, description, and independent line
+items with their prices. A second job for the same quote returns 409 naming the
+existing job. For walk-in work, omit `quoteId` and send `orgSlug`, `client`,
+`location`, and `services` instead. Each service accepts `serviceId`, `quantity`,
+`unitPrice`, `description`, and job-service `status` (default `PENDING`).
+Mixing the two creation modes returns 400. `organizationSlug` is also accepted as
+an alias for `orgSlug` in creation bodies.
+
+Nested item edits check that the item belongs to the addressed quote/job and return
+404 otherwise. Adding a service the organization does not offer returns 422.
+A quote can contain each service once (duplicates return 409); jobs may repeat a service.
+
+User creation accepts `email`, `name`, `password`, `role`, and `verified`
+(default true). PATCH accepts `role` and `verified`; the verify endpoint force-verifies
+an account without SMTP. Responses never include password hashes. Administrators
+cannot delete or demote themselves, or remove the last administrator (409).
+Role changes apply on the next request because JWT authentication reloads database roles.
+
+Organization creation requires `name`, `slug`, and `contactEmail`; `active`
+defaults to true. PATCH accepts `name`, `contactEmail`, `active`, and
+`mailSettings` (`mail` is an accepted alias). Mail settings accept `host`, `port`,
+`username`, `passwordEnv`, `sslEnabled`, `starttlsEnabled`, `fromEmail`, and
+`fromName`. When a host is configured, port, username, passwordEnv and fromEmail
+must also be present in the resulting settings. Incomplete settings return 400 naming
+the missing fields. `passwordEnv` is an environment-variable **name**, never a resolved
+password. Organization responses expose it as `smtpPasswordEnv`.
+
+### OpenAPI and Swagger UI
+
+Open [Swagger UI](http://localhost:8080/swagger-ui.html) locally; the OpenAPI document
+is at [`/v3/api-docs`](http://localhost:8080/v3/api-docs). Both are public when enabled.
+Use **Authorize** with the access token from `POST /api/auth/login` to exercise admin routes.
+
+`SWAGGER_ENABLED` defaults to `true` for local development. **Set
+`SWAGGER_ENABLED=false` in production (including Render)** to disable both the
+document and UI routes; they then return 404. The flag controls both
+`springdoc.api-docs.enabled` and `springdoc.swagger-ui.enabled`.
 
 ## Database migrations
 
@@ -438,8 +563,7 @@ Java 17+, Maven 3.8+, PostgreSQL 16+, and Docker (for the Testcontainers-backed 
 
 ### Environment variables
 
-All are required and have no defaults except `PORT`; the application will not start
-without them.
+Variables with defaults are marked below; configure the remaining values before startup.
 
 | Variable          | Description                | Example                                    |
 | :---------------- | :------------------------- | :----------------------------------------- |
@@ -449,12 +573,20 @@ without them.
 | `EMAIL_SENDER`    | SMTP account (the `From`)  | `no-reply@example.com`                      |
 | `SMTP_PASS`       | SMTP password              | `...`                                       |
 | `SMTP_PORT`       | SMTP port                  | `465`                                       |
+| `SMTP_HOST`       | SMTP host (default `smtp0001.neo.space`) | `smtp.gmail.com`              |
+| `SMTP_SSL`        | Implicit TLS (default `true`) | `false` for port 587                     |
+| `SMTP_STARTTLS`   | STARTTLS (default `false`) | `true` for port 587                         |
 | `CORS_ALLOWED`    | Allowed origins, comma-separated | `http://localhost:3000`              |
 | `AWS_ACCESS_KEY`  | AWS access key id          | `AKIA...`                                   |
 | `AWS_SECRET_KEY`  | AWS secret access key      | `...`                                       |
 | `AWS_REGION`      | Bucket region              | `us-east-2`                                 |
 | `AWS_BUCKET_NAME` | S3 bucket for quote photos | `yls-uploads`                               |
+| `SWAGGER_ENABLED` | Enable Swagger UI and OpenAPI (default `true`; set `false` in production) | `false` |
 | `PORT`            | HTTP port (default `8080`) | `8080`                                      |
+| `JWT_KEY`         | HMAC-SHA256 signing key, **32+ bytes** | a long random string          |
+| `ADMIN_PASSWORD`  | Password for the seeded admin account | `...`                          |
+| `VERIFICATION_BASE_URL` | Public URL verification links point at | `https://api.example.com` |
+| `VERIFICATION_TTL_MINUTES` | Verification link lifetime (default `60`) | `60`             |
 
 Plus one variable per organization that has its own SMTP account, named by that org's
 `smtp_password_env` (e.g. `SMTP_PASS_TCS`). Orgs using the global sender need none.
@@ -476,7 +608,7 @@ cd sping-all-purpose-server && ./mvnw clean verify
 cd sping-all-purpose-server && ./mvnw spring-boot:run
 ```
 
-Flyway applies `V1` and `V2` on first start. Confirm with:
+Flyway applies migrations `V1` through `V6` on first start. Confirm with:
 
 ```sql
 SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;
@@ -484,11 +616,40 @@ SELECT version, description, success FROM flyway_schema_history ORDER BY install
 
 ### Tests
 
-Tests run against a real PostgreSQL via Testcontainers rather than H2 — the baseline
-uses `GENERATED BY DEFAULT AS IDENTITY`, `timestamptz` and a partial unique index,
-which H2's Postgres compatibility mode does not reproduce faithfully. `SchemaValidationTest`
-is the important one: it boots the whole context with Flyway and `validate`, proving the
-migrations and all ten mappings agree.
+Unit tests and MVC security/OpenAPI tests run without a database. They cover quote
+pricing and ownership, quote-to-job conversion, admin lockout guards, mail validation,
+email-event behavior, all admin routes' 401/403 responses, and the Swagger off switch.
+
+Run the checks that do not need Docker:
+
+```bash
+cd sping-all-purpose-server
+./mvnw "-Dtest=*,!SchemaValidationTest,!QuoteSubmissionServiceTest,!LegacyQuoteEndpointTest,!SpingAllPurposeServerApplicationTests,!AdminWorkflowTest" verify
+```
+
+The five excluded integration test classes use real PostgreSQL. Run
+`./mvnw verify` with Docker to include them using PostgreSQL 16 through
+Testcontainers because identity columns, `timestamptz`, and partial unique indexes
+are not faithfully reproduced by H2. `SchemaValidationTest` starts Flyway and
+Hibernate validation against all twelve entity mappings.
+
+Alternatively, run every test against a disposable local PostgreSQL database:
+
+```bash
+./mvnw -Dtest.database.url=jdbc:postgresql://localhost:5432/yls_test \
+  -Dtest.database.username=postgres -Dtest.database.password=test_password verify
+```
+
+Create that test database first. The suite applies migrations and writes test data;
+use a fresh database for each verification run. With no `test.database.url`, the suite
+starts its own Testcontainers instance. `AdminWorkflowTest` exercises real JWT login,
+quote creation and pricing, job conversion, independent copied prices, and paged reads
+through the full HTTP/security/service/database stack with SMTP mocked.
+
+For a local smoke check, log in as an administrator and request
+`GET /api/admin/quotes?orgSlug=tcs` with the access token. Without a token it must
+return 401; `GET /api/orgs/tcs/quotes` must return 405. Check the admin paths in
+`/v3/api-docs`, then restart with `SWAGGER_ENABLED=false` and confirm it returns 404.
 
 ## Tech stack
 
@@ -501,35 +662,25 @@ migrations and all ten mappings agree.
   `@NoArgsConstructor` on entities — `@Data`, `@ToString` and generated
   `equals`/`hashCode` traverse lazy associations and are deliberately avoided).
 - **AWS SDK v2** — presigned S3 URLs for quote photos.
-- **Spring Security** — currently permissive; see below.
+- **Spring Security** — stateless JWT, ADMIN URL rules and method authorization.
 
 ## Known gaps
 
-Tracked deliberately rather than silently:
-
-1. **No authentication.** Every endpoint is `permitAll()`. This is why `Job`, `Review`
-   and line-item prices have entities and repositories but no REST API, and why there
-   is no `GET /quotes/{id}` — a sequential id on an unauthenticated read endpoint would
-   let anyone enumerate clients' names, emails, phones and addresses.
-2. **No rate limiting.** Quote submission is unauthenticated and sends two emails.
-3. ~~`GET /api/upload/{name}` issues a presigned PUT for a caller-controlled object
-   key.~~ Fixed — keys are now server-constructed by `POST /api/orgs/{slug}/uploads`.
-4. **No currency**, despite `Country` spanning the USA and Canada; and a quote stores
-   no frozen total, so an accepted quote's total must be recomputed from lines that may
-   have changed since.
-5. **`expires_at` has no sweeper.** Expiry is computed on read.
-6. **The service catalog is global** — two organizations share a `service` row, so
-   editing a description affects both.
-7. **Emails are sent synchronously** after the transaction commits. A failure can no
-   longer roll back a saved quote, but the HTTP response still waits on SMTP.
+1. Review CRUD, password reset/change, and organization-scoped staff permissions are
+   not implemented. Admin-set passwords remain a temporary account-creation mechanism.
+2. No rate limiting on the public quote funnel.
+3. No currency field; quote totals are recomputed from current line items.
+4. `expires_at` has no background sweeper.
+5. The service catalogue is global: changing a shared service affects every organization
+   that offers it.
+6. Email runs asynchronously after commit but has no durable outbox for process crashes.
 
 ## Roadmap
 
-1. Authentication (JWT/OAuth2), then the Job and Review APIs behind it.
+1. Review API and account password management.
 2. Rate limiting on quote submission.
-3. Server-generated S3 keys.
-4. Async email dispatch with a bounded executor.
-5. OpenAPI/Swagger documentation.
+3. Organization-scoped staff permissions when needed.
+4. Durable outbound email delivery.
 
 The pre-refactor design sketch is kept at [`docs/legacy/`](./docs/legacy/) for history;
 the diagram above is the current model.

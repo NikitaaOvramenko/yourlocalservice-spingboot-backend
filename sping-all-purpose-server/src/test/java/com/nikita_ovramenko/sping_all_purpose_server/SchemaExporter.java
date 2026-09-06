@@ -8,6 +8,8 @@ import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistry;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 
+import com.nikita_ovramenko.sping_all_purpose_server.app_user.model.AppUser;
+import com.nikita_ovramenko.sping_all_purpose_server.app_user.model.EmailVerification;
 import com.nikita_ovramenko.sping_all_purpose_server.client.model.Client;
 import com.nikita_ovramenko.sping_all_purpose_server.job.model.Job;
 import com.nikita_ovramenko.sping_all_purpose_server.joblineitem.model.JobLineItem;
@@ -51,6 +53,8 @@ public final class SchemaExporter {
 
         try {
             Metadata metadata = new MetadataSources(registry)
+                    .addAnnotatedClass(AppUser.class)
+                    .addAnnotatedClass(EmailVerification.class)
                     .addAnnotatedClass(Client.class)
                     .addAnnotatedClass(Location.class)
                     .addAnnotatedClass(Organization.class)

@@ -11,6 +11,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.nikita_ovramenko.sping_all_purpose_server.common.service.JwtService;
+import com.nikita_ovramenko.sping_all_purpose_server.app_user.service.AuthSessionService;
+import io.jsonwebtoken.JwtException;
 
 import org.springframework.context.annotation.Lazy;
 
@@ -23,10 +25,12 @@ import jakarta.servlet.http.HttpServletResponse;
 public class JwtFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+    private final AuthSessionService sessions;
 
-    public JwtFilter(JwtService jwtService, @Lazy UserDetailsService userDetailsService) {
+    public JwtFilter(JwtService jwtService, @Lazy UserDetailsService userDetailsService, AuthSessionService sessions) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.sessions = sessions;
     }
 
     @Override
@@ -43,10 +47,15 @@ public class JwtFilter extends OncePerRequestFilter {
         // Validate JWT and set authentication - only catch JWT-related exceptions
         try {
             final String jwt = authHeader.substring(7);
-            final String userEmail = jwtService.extractUsername(jwt);
+            final JwtService.TokenIdentity identity = jwtService.readAccessToken(jwt);
+            final String userEmail = identity.email();
+            sessions.requireActive(identity.sessionId(), userEmail);
 
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
+                if (!userDetails.isEnabled()) {
+                    throw new JwtException("Account unavailable");
+                }
 
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
@@ -57,10 +66,10 @@ public class JwtFilter extends OncePerRequestFilter {
             response.setContentType("application/json");
             response.getWriter().write("{\"status\": 401, \"message\": \"User not found\"}");
             return;
-        } catch (Exception e) {
+        } catch (JwtException | IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
-            response.getWriter().write("{\"status\": 401, \"message\": \"Invalid token: " + e.getMessage() + "\"}");
+            response.getWriter().write("{\"status\":401,\"message\":\"Session expired or invalid\"}");
             return;
         }
 

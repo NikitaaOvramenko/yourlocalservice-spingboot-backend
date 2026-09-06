@@ -1,9 +1,8 @@
 package com.nikita_ovramenko.sping_all_purpose_server;
 
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * A real Postgres for tests that touch the schema.
@@ -12,16 +11,28 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * partial unique index, none of which H2's Postgres compatibility mode handles
  * reliably -- and the entire point is proving the real DDL matches the real mappings.
  *
- * <p>@ServiceConnection is what points Spring at the container. Without it (or
- * @AutoConfigureTestDatabase(replace = NONE)) the test slices swap in an embedded
- * database and the tests silently prove nothing.
+ * <p>By default a singleton Testcontainers database is started and cleaned up by
+ * Testcontainers at JVM shutdown. Set test.database.url, test.database.username and
+ * test.database.password to use a disposable local PostgreSQL database instead.
  *
  * <p>The container is static, so one instance is shared by every subclass.
  */
-@Testcontainers
 public abstract class AbstractPostgresTest {
 
-    @Container
-    @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        String localUrl = System.getProperty("test.database.url");
+        if (localUrl != null && !localUrl.isBlank()) {
+            registry.add("spring.datasource.url", () -> localUrl);
+            registry.add("spring.datasource.username", () -> System.getProperty("test.database.username", "postgres"));
+            registry.add("spring.datasource.password", () -> System.getProperty("test.database.password", ""));
+        } else {
+            POSTGRES.start();
+            registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+            registry.add("spring.datasource.username", POSTGRES::getUsername);
+            registry.add("spring.datasource.password", POSTGRES::getPassword);
+        }
+    }
 }
